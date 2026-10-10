@@ -217,3 +217,28 @@ def test_dnestr_gpkg_axis_and_chain():
     gaps = [float(frames.distance_km(a.lat, a.lon, b.lat, b.lon)) for a, b in zip(chain[:-1], chain[1:])]
     assert min(gaps) >= 4.85 and max(gaps) < 5.2                             # шаг рамок 4,9 км по прямой
     assert frames.distance_km(chain[-1].lat, chain[-1].lon, *targets.TIRASPOL) < 20
+
+
+# --- цепочка кадров из GeoPackage --------------------------------------------------
+CHAIN_GPKG = os.path.join(os.path.dirname(__file__), "..", "data", "Тудора_21_кадр_цепочка.gpkg")
+
+
+@pytest.mark.skipif(not os.path.exists(CHAIN_GPKG), reason="нет файла цепочки")
+def test_chain_plan_covers_all_frames(tmp_path):
+    from sarplan import gis
+    from sarplan.chain import plan_chain, write_outputs
+    from sarplan.config import KONDOR_FKA
+    info = gis.read_gpkg_frames(CHAIN_GPKG)
+    assert [f["num"] for f in info] == list(range(1, 22))
+    ring = info[0]["ring"]
+    assert frames.distance_km(*ring[0], *ring[1]) == pytest.approx(5.0, abs=0.01)   # рамки 5×5 км
+    sat = orbit.make_sso_satellite("K", 99001, datetime(2026, 10, 10), KONDOR_FKA.alt_km, 10.5, 0.0,
+                                   KONDOR_FKA.incl_deg)
+    res = plan_chain(info, [sat], KONDOR_FKA, datetime(2026, 10, 10), 60.0)
+    assert not res["not_shot"] and len(res["rows"]) == 21          # Δt = 66 с: один кадр за пролёт
+    revs = [r["rev"] for r in res["rows"]]
+    assert revs == sorted(revs) and len(set(revs)) == len(revs)
+    write_outputs(res, CHAIN_GPKG, str(tmp_path), "t", "тест")
+    import sqlite3
+    con = sqlite3.connect(str(tmp_path / "t.gpkg"))
+    assert con.execute("select count(*) from frames where pass_no is not null").fetchone()[0] == 21

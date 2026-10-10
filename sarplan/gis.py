@@ -29,7 +29,18 @@ def _parse_wkb(buf: bytes, pos: int = 0):
         xy = np.frombuffer(buf, dtype=order + "f8", count=n * dims, offset=pos).reshape(n, dims)
         pos += 8 * n * dims
         return [[(float(y), float(x)) for x, y in xy[:, :2]]], pos
-    if base == 5:                                        # MultiLineString
+    if base == 3:                                        # Polygon -> кольца как линии
+        nr = struct.unpack_from(order + "I", buf, pos)[0]
+        pos += 4
+        out = []
+        for _ in range(nr):
+            n = struct.unpack_from(order + "I", buf, pos)[0]
+            pos += 4
+            xy = np.frombuffer(buf, dtype=order + "f8", count=n * dims, offset=pos).reshape(n, dims)
+            pos += 8 * n * dims
+            out.append([(float(y), float(x)) for x, y in xy[:, :2]])
+        return out, pos
+    if base in (5, 6):                                   # MultiLineString / MultiPolygon
         n = struct.unpack_from(order + "I", buf, pos)[0]
         pos += 4
         out = []
@@ -41,7 +52,7 @@ def _parse_wkb(buf: bytes, pos: int = 0):
 
 
 def parse_gpkg_geometry(blob: bytes) -> List[Line]:
-    """Геометрия GPKG (заголовок 'GP' + WKB) -> список линий [(lat, lon)]."""
+    """Геометрия GPKG (заголовок 'GP' + WKB) -> список линий/колец [(lat, lon)]."""
     if blob[:2] != b"GP":
         raise ValueError("Не геометрия GeoPackage")
     flags = blob[3]
@@ -116,3 +127,32 @@ def cut_from_end(line: Line, start_point: Tuple[float, float], length_km: float)
         p = a[j - 1] + t * (a[j] - a[j - 1])
         out.append((float(p[0]), float(p[1])))
     return out
+
+
+def read_gpkg_frames(path: str, layer: Optional[str] = None, order_field: str = "seq") -> List[dict]:
+    """
+    Кадры-полигоны из GeoPackage: номер (поле order_field или fid), центр
+    (поля center_lat/center_lon или центр внешнего кольца) и контур.
+    """
+    con = sqlite3.connect(path)
+    try:
+        if layer is None:
+            layer = con.execute("select table_name from gpkg_contents where data_type='features'").fetchone()[0]
+        srs, col = con.execute("select srs_id, column_name from gpkg_geometry_columns where table_name=?",
+                               (layer,)).fetchone()
+        if srs != 4326:
+            raise ValueError(f"Ожидается WGS-84 (EPSG:4326), в слое {layer} srs_id={srs}")
+        names = [r[1] for r in con.execute(f'pragma table_info("{layer}")')]
+        out = []
+        for row in con.execute(f'select * from "{layer}"'):
+            rec = dict(zip(names, row))
+            ring = parse_gpkg_geometry(rec[col])[0]
+            ring_pts = np.array(ring[:-1] if ring[0] == ring[-1] else ring)
+            lat = rec.get("center_lat", float(ring_pts[:, 0].mean()))
+            lon = rec.get("center_lon", float(ring_pts[:, 1].mean()))
+            num = rec.get(order_field, rec.get("fid"))
+            out.append({"num": int(num), "lat": float(lat), "lon": float(lon), "ring": ring,
+                        "attrs": {k: v for k, v in rec.items() if k != col}})
+        return sorted(out, key=lambda r: r["num"])
+    finally:
+        con.close()

@@ -1,0 +1,54 @@
+# Пример конфигурации программного комплекса моделирования параметров
+# радиолокационной съёмки высокого разрешения (по ТЗ и Таблице 1 статьи).
+
+# Параметры космического аппарата
+spacecraft:
+  norad_id: 56756          # Кондор-ФКА (KONDOR FKA NO.1)
+  orbit_height_km: 518.833 # номинальная высота орбиты (для справки)
+  tle_source: "file"       # "file" | "spacetrack" — источник TLE
+
+# Параметры РСА (Таблица 1 статьи)
+sar:
+  wavelength_m: 0.1        # длина волны, м (S-диапазон)
+  antenna_size_m: 6        # размер антенны по азимуту, м
+  beamwidth_deg: 1.0       # ширина ДН по уровню -3 дБ, град
+  scan_sector_deg: 4.1     # сектор электронного сканирования в азимутальной плоскости, град
+  incidence_angle_min_deg: 24   # диапазон углов визирования (Таблица 1 статьи)
+  incidence_angle_max_deg: 55
+  bandwidth_mhz: 300       # ширина полосы сигнала B, МГц
+  min_switch_time_s: 66    # минимальное время переключения, с
+
+# Ограничения по наклонной дальности (км)
+slant_range:
+  min_km: 561
+  max_km: 964
+
+# Цели (геодезические координаты: широта B, долгота L, высота H в км)
+targets:
+  - name: "Санкт-Петербург"
+    lat_deg: 59.95
+    lon_deg: 30.316667
+    height_km: 0.012       # 12 м
+
+# Целевое азимутальное разрешение для режима Staring Spotlight, м
+target_azimuth_resolution_m: 0.75
+
+# Временной интервал моделирования
+time:
+  start: "2024-03-22T00:00:00"   # ISO 8601 UTC
+  num_days: 16
+
+# Параметры сканирования
+scan:
+  time_step_s: 10.0        # шаг при поиске окон, с
+  min_window_duration_s: 5.0   # минимальная длительность окна, с (для сопоставимости с основной программой)
+
+# Выходные данные
+output:
+  report_json: "result/sar_model_report.json"
+  report_csv: "result/sar_model_report.csv"
+  table2_md: "result/table2_geometry.md"
+  table3_md: "result/table3_synthesis.md"
+  table3_csv: "result/table3_synthesis.csv"
+  plots_dir: "result/plots"
+  format_plots: ["png"]    # png | pdf

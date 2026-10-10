@@ -218,3 +218,6 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Выходные файлы запусков (результаты экспериментов статьи хранятся в results/)
+result/

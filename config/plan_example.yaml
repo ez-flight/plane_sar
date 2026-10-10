@@ -1,0 +1,36 @@
+# Пример заявки на текущее планирование съёмки СРО (участок Днестра).
+# Запуск: python -m sarplan plan config/plan_example.yaml
+
+sensor:
+  preset: iceye          # iceye | obzor-r | kondor-fka (таблица 2 статьи и пресеты КА большого класса)
+  overrides:             # любые поля SensorParams, например:
+    budget_s: 75         # T_вкл max, с
+    d_beta_sk_max: 5.0   # Δβ_ск max, °
+
+satellites:
+  synthetic:             # гипотетические КА в ССО (синтетические TLE)
+    - {name: S1, ltan_h: 10.5, mean_anomaly_deg: 0}
+    - {name: S2, ltan_h: 10.5, mean_anomaly_deg: 120}
+    - {name: S3, ltan_h: 10.5, mean_anomaly_deg: 240}
+  tle_file: null         # или файл TLE (например backup.tle) ...
+  norad_ids: []          # ... и номера КА из него
+
+time:
+  start: "2026-06-01T00:00:00"   # UTC
+  horizon_h: 48
+
+method: proposed_cluster  # proposed | proposed_cluster | proposed_full | greedy_priority | seq_analog2 | dp_additive
+frame_km: 5
+
+elements:
+  - id: RIVER
+    kind: line
+    priority: 3
+    deadline_h: 30
+    points: [[46.07, 30.46], [46.20, 30.33], [46.33, 30.25], [46.42, 30.27], [46.45, 30.12], [46.55, 30.02]]
+  - {id: BRIDGE, kind: point, lat: 46.62, lon: 29.93, priority: 5, deadline_h: 12, looks: 2}
+  - {id: DEPOT, kind: point, lat: 46.40, lon: 30.05, priority: 4}
+  - {id: BASE, kind: area, lat: 46.70, lon: 29.85, n_along: 2, n_across: 2, priority: 2}
+
+output:
+  dir: result/plan

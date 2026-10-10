@@ -40,8 +40,20 @@ def build_scenario(cfg: dict):
         if kind == "point":
             parts.append(targets.point_element(e["id"], e["lat"], e["lon"], n_looks=int(e.get("looks", 1)), **common))
         elif kind == "line":
-            parts.append(targets.line_element(e["id"], [tuple(p) for p in e["points"]], frame_km=frame_km,
-                                              overlap_km=float(e.get("overlap_km", 0.1)), **common))
+            chord = False
+            if "gpkg" in e:
+                from .gis import cut_from_end, read_gpkg_lines
+                from .frames import distance_km
+                lines = read_gpkg_lines(e["gpkg"], e.get("layer"))
+                start = tuple(e["from"])
+                near = lambda l: float(np.min(distance_km(np.array(l)[:, 0], np.array(l)[:, 1], *start)))
+                pts = cut_from_end(min(lines, key=near), start, float(e.get("length_km", 100.0)))
+                chord = True
+            else:
+                pts = [tuple(p) for p in e["points"]]
+            parts.append(targets.line_element(e["id"], pts, frame_km=frame_km, chord=chord,
+                                              overlap_km=float(e.get("overlap_km", 0.1)),
+                                              n_frames=e.get("max_frames"), **common))
         elif kind == "area":
             parts.append(targets.area_element(e["id"], e["lat"], e["lon"], int(e.get("n_along", 2)),
                                               int(e.get("n_across", 2)), float(e.get("azimuth_deg", 0.0)),

@@ -23,11 +23,14 @@ method: proposed_cluster  # proposed | proposed_cluster | proposed_full | greedy
 frame_km: 5
 
 elements:
-  - id: RIVER
+  - id: RIVER            # ось берётся из точного профиля Днестр.gpkg: от точки from вверх по течению
     kind: line
     priority: 3
     deadline_h: 30
-    points: [[46.07, 30.46], [46.20, 30.33], [46.33, 30.25], [46.42, 30.27], [46.45, 30.12], [46.55, 30.02]]
+    gpkg: Днестр.gpkg
+    from: [46.07, 30.46]   # выход лимана в море; участок отсчитывается от ближайшего конца линии
+    length_km: 100
+    # вместо gpkg можно задать вершины: points: [[46.30, 30.27], [46.42, 30.27], ...]
   - {id: BRIDGE, kind: point, lat: 46.62, lon: 29.93, priority: 5, deadline_h: 12, looks: 2}
   - {id: DEPOT, kind: point, lat: 46.40, lon: 30.05, priority: 4}
   - {id: BASE, kind: area, lat: 46.70, lon: 29.85, n_along: 2, n_across: 2, priority: 2}

@@ -201,3 +201,19 @@ def test_saturation_beats_additive_dp_on_duplicates(ref_pass):
     a = planner.plan_pass(g, m, m.new_acc(), 0.0, range(len(frs)), "proposed").gain
     d = planner.plan_pass(g, m, m.new_acc(), 0.0, range(len(frs)), "dp_additive").gain
     assert a > d
+
+
+# --- профиль Днестра из GeoPackage -------------------------------------------------
+@pytest.mark.skipif(not os.path.exists(targets.DNESTR_GPKG), reason="нет Днестр.gpkg")
+def test_dnestr_gpkg_axis_and_chain():
+    from sarplan import gis
+    lines = gis.read_gpkg_lines(targets.DNESTR_GPKG)
+    assert sum(gis.polyline_length_km(l) for l in lines) == pytest.approx(1383, rel=0.02)
+    axis = targets.dnestr_axis("gpkg")
+    assert frames.distance_km(*axis[0], *targets.BLACK_SEA_POINT) < 40      # начинается у устья
+    els, frs = targets.dnestr_targets(source="gpkg")
+    chain = [f for f in frs if f.fid.startswith("DNESTR")]
+    assert len(chain) == 21 and len(frs) == 40
+    gaps = [float(frames.distance_km(a.lat, a.lon, b.lat, b.lon)) for a, b in zip(chain[:-1], chain[1:])]
+    assert min(gaps) >= 4.85 and max(gaps) < 5.2                             # шаг рамок 4,9 км по прямой
+    assert frames.distance_km(chain[-1].lat, chain[-1].lon, *targets.TIRASPOL) < 20

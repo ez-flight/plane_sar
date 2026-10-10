@@ -503,7 +503,23 @@ def run_all(out_dir: str = "results", names: Sequence[str] = None, quick: bool =
         parts.append(ALL[n](out_dir, **kw))
         print(f"[{n}] {time.perf_counter() - t:.1f} с", flush=True)
     report = "\n".join(parts)
-    if out_dir and set(names) == set(ALL):
-        with open(os.path.join(out_dir, "REPORT.md"), "w", encoding="utf-8") as f:
-            f.write(report)
+    if out_dir:
+        assemble_report(out_dir, quick)
     return report
+
+
+REPORT_FILES = ["fig1_duration", "table3_single_pass", "duplicates", "sensitivity", "table4_admissibility",
+                "table5_rolling", "line21_single_pass", "table6_constellation", "table7_classes"]
+
+
+def assemble_report(out_dir: str, quick: bool = False) -> None:
+    """Собрать results/REPORT.md из сохранённых разделов (после полного или выборочного пересчёта)."""
+    parts = ["# Результаты моделирования (sarplan)\n",
+             f"Обновлено {datetime.now():%Y-%m-%d %H:%M}. Ось Днестра: "
+             f"{'точный профиль Днестр.gpkg' if os.path.exists(targets.DNESTR_GPKG) else 'приближённая'}.\n"]
+    for name in REPORT_FILES:
+        path = os.path.join(out_dir, name + ".md")
+        if os.path.exists(path):
+            parts.append(open(path, encoding="utf-8").read())
+    with open(os.path.join(out_dir, "REPORT.md"), "w", encoding="utf-8") as f:
+        f.write("\n".join(parts))

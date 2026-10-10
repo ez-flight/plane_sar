@@ -35,7 +35,9 @@ def chain_scenario(frames_info: Sequence[dict], chain_id: str = "CHAIN"):
 
 
 def plan_chain(frames_info: Sequence[dict], sats: Sequence[Satellite], sensor: SensorParams,
-               t_start: datetime, days: float, method: str = "proposed_cluster") -> dict:
+               t_start: datetime, days: float, method: Optional[str] = None) -> dict:
+    if method is None:
+        method = "strip" if sensor.mode == "stripmap" else "proposed_cluster"
     els, frs = chain_scenario(frames_info)
     center = region_center_of(frs)
     passes = constellation_passes(sats, center, t_start, t_start + timedelta(days=days), sensor)
@@ -63,7 +65,9 @@ def plan_chain(frames_info: Sequence[dict], sats: Sequence[Satellite], sensor: S
             "pass": len(rows) + 1, "sat": p.sat_name, "rev": sat.rev_number(t_first),
             "start_utc": str(t_first)[:19], "hours_from_start": round(h, 2),
             "direction": "восходящий" if p.ascending else "нисходящий",
-            "look_center_deg": round(float(lk[ib]), 1), "n_frames": len(nums),
+            "look_center_deg": round(float(lk[ib]), 1),
+            "swath_km": (g.point_description(plan.point).get("swath_center_km", "")),
+            "n_frames": len(nums),
             "frames": " ".join(nums), "cumulative": len(frs) - len(remaining),
         })
         for k, s in plan.items:
@@ -84,11 +88,15 @@ def chain_markdown(res: dict, title: str) -> str:
     else:
         out.append(f"За горизонт снято {res['n_frames'] - len(res['not_shot'])} из {res['n_frames']} кадров; "
                    f"не сняты: {', '.join(res['not_shot'])}.\n")
-    out.append("| Пролёт | КА | Виток | Начало съёмки, UTC | Ветвь | Угол визир. центра, ° | Кадров | Номера кадров (порядок съёмки) | Всего снято |")
-    out.append("|---|---|---|---|---|---|---|---|---|")
+    strip = any(r["swath_km"] != "" for r in res["rows"])
+    extra_h, extra_s = (" Центр полосы от трассы, км |", "---|") if strip else ("", "")
+    out.append("| Пролёт | КА | Виток | Начало съёмки, UTC | Ветвь | Угол визир. центра, ° |" + extra_h +
+               " Кадров | Номера кадров (порядок съёмки) | Всего снято |")
+    out.append("|---|---|---|---|---|---|" + extra_s + "---|---|---|")
     for r in res["rows"]:
+        ex = f" {abs(r['swath_km']):.1f} |" if strip else ""
         out.append(f"| {r['pass']} | {r['sat']} | {r['rev']} | {r['start_utc']} | {r['direction']} | "
-                   f"{r['look_center_deg']} | {r['n_frames']} | {r['frames']} | {r['cumulative']} |")
+                   f"{r['look_center_deg']} |{ex} {r['n_frames']} | {r['frames']} | {r['cumulative']} |")
     return "\n".join(out) + "\n"
 
 

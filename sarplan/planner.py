@@ -337,7 +337,34 @@ def _dp_additive(ctx: _Ctx) -> List[Tuple[int, int]]:
     return list(best[3])
 
 
+def _strip(ctx: _Ctx) -> List[Tuple[int, int]]:
+    """
+    Маршрутный режим: на пролёт одна полоса (крен) и один непрерывный маршрут длительностью
+    не более T_вкл max. Кадры в полосе снимаются одновременно, наложения разрешены;
+    выбирается окно маршрута с наибольшим приростом Э.
+    """
+    if not ctx.cand:
+        return []
+    B = int(round(ctx.budget / ctx.geom.dt))
+    first = {k: np.flatnonzero(ctx.start_ok[k]) for k in ctx.cand}
+    starts = sorted({int(x) for k in ctx.cand for x in first[k]})
+    best, best_items = 0.0, []
+    for s0 in starts:
+        items = []
+        for k in ctx.cand:
+            ok = first[k][(first[k] >= s0) & (first[k] + ctx.n_dur[k] <= s0 + B)]
+            if len(ok):
+                items.append((k, int(ok[0])))
+        if ctx.q[[k for k, _ in items]].sum() > ctx.q_max + EPS:
+            continue
+        v = ctx.value([k for k, _ in items])
+        if v > best + EPS:
+            best, best_items = v, items
+    return sorted(best_items, key=lambda x: x[1])
+
+
 CORES: Dict[str, Callable] = {
+    "strip": _strip,
     "proposed": _greedy_rho,
     "greedy_priority": _greedy_priority,
     "greedy_priority_sat": lambda ctx: _greedy_priority(ctx, saturation=True),
@@ -348,6 +375,8 @@ CORES: Dict[str, Callable] = {
 
 
 def _points_for(method: str, geom: PassGeometry, model: CoverageModel) -> List[int]:
+    if method == "strip":
+        return list(range(len(geom.point_params)))
     if method == "proposed_full":
         return list(range(len(geom.point_params)))
     if method == "proposed_cluster":

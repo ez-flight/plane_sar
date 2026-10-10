@@ -150,7 +150,8 @@ def main(argv=None):
     c.add_argument("--norad", nargs="*", default=[], help="номера NORAD из файла TLE")
     c.add_argument("--start", default=None, help="начало расчёта, UTC (по умолчанию эпоха TLE или 2026-10-10)")
     c.add_argument("--days", type=float, default=10.0)
-    c.add_argument("--method", default="proposed_cluster")
+    c.add_argument("--method", default=None, help="по умолчанию: strip для маршрутного режима, иначе proposed_cluster")
+    c.add_argument("--ltan", nargs="*", type=float, default=None, help="МВВУ плоскостей, ч (по умолчанию 10.5 14.5 6 18)")
     c.add_argument("--out", default="result/chain")
     c.add_argument("--name", default="chain_plan")
     b = sub.add_parser("experiments", help="воспроизвести таблицы 3–7 и рисунки 1–2 статьи")
@@ -175,7 +176,8 @@ def main(argv=None):
             who = ", ".join(s.name for s in sats)
         else:
             start = _parse_time(args.start or "2026-10-10T00:00:00")
-            sats = build_constellation(args.planes, args.per_plane, start, sensor, phase_deg=args.phase)
+            kw = {"ltans": args.ltan} if args.ltan else {}
+            sats = build_constellation(args.planes, args.per_plane, start, sensor, phase_deg=args.phase, **kw)
             who = f"{len(sats)} КА ({args.planes} пл. × {args.per_plane})"
         frames_info = read_gpkg_frames(args.frames)
         res = plan_chain(frames_info, sats, sensor, start, args.days, args.method)

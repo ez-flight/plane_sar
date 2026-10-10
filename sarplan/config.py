@@ -60,7 +60,18 @@ AIST_ST = SensorParams(
     t_frame_s=4.0, budget_s=60.0, gap_s=0.0, swath_km=30.0, frame_km=5.0,
 )
 
-PRESETS = {"iceye": ICEYE_CLASS, "obzor-r": OBZOR_R, "kondor-fka": KONDOR_FKA, "aist-st": AIST_ST}
+# «АИСТ-СТ», прожекторный режим (будет испытываться на следующем этапе, ожидаемое разрешение 2 м):
+# луч удерживается на кадре разворотом всего КА, поэтому окно съёмки задаётся сектором скоса
+# относительно траверза, а между кадрами нужен перенацеливание КА. Не опубликованы и приняты:
+# сектор скоса ±20°, кадр 5×5 км за 5 с (синтез 2 м в X-диапазоне ≈ 0,7 с плюс успокоение),
+# перенацеливание между кадрами 15 с, суммарное время излучения за пролёт 60 с.
+AIST_ST_SPOT = AIST_ST.with_(
+    name="АИСТ-СТ (прожекторный)", mode="electronic", d_beta_sk_max=20.0, beta_sk_max=20.0,
+    t_frame_s=5.0, gap_s=15.0, budget_s=60.0, swath_km=0.0,
+)
+
+PRESETS = {"iceye": ICEYE_CLASS, "obzor-r": OBZOR_R, "kondor-fka": KONDOR_FKA, "aist-st": AIST_ST,
+           "aist-st-spot": AIST_ST_SPOT}
 
 # Район моделирования: окрестность Днестра
 REGION_CENTER = (46.5, 30.0)

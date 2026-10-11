@@ -85,6 +85,10 @@ class PassGeometry:
         if sensor.mode == "hybrid":
             self.points, self.point_params = self._pointing_grid(along_grid, depth_mults)
             self.nominal = self.point_params.index((0.0, 1.0))
+        elif sensor.mode == "stripmap":
+            self.points = None
+            self.point_params = self._swath_grid()
+            self.nominal = len(self.point_params) // 2
         else:
             self.points, self.point_params, self.nominal = None, [("broadside", None)], 0
         P = len(self.point_params)
@@ -138,15 +142,47 @@ class PassGeometry:
                 params.append((l, m))
         return np.array(pts), params
 
+    def _swath_grid(self):
+        """
+        Маршрутный режим: варианты положения полосы (крен на пролёт). x_k — удаление
+        центра кадра от подспутниковой трассы по поверхности на траверзе; полоса с
+        центром x_c снимает кадр, если он целиком в ней: |x_k - x_c| ≤ (W - f)/2.
+        """
+        r, v = self.pas.r, self.pas.v
+        F = np.array([f.ecef for f in self.frames])
+        sk_c, _ = geometry.squint_look(r, v, self.center[None, :])
+        ib = int(np.argmin(np.abs(sk_c)))
+        up = r[ib] / np.linalg.norm(r[ib])
+        right = np.cross(v[ib], up)
+        right /= np.linalg.norm(right)
+        nadir = r[ib] * (np.linalg.norm(self.center) / np.linalg.norm(r[ib]))
+        self.cross_km = (F - nadir) @ right
+        self.broadside_index = ib
+        W, f = self.sensor.swath_km, self.sensor.frame_km
+        half = max((W - f) / 2.0, 0.0)
+        lo, hi = self.cross_km.min() - half, self.cross_km.max() + half
+        sign = np.sign(np.median(self.cross_km)) or 1.0
+        grid = np.arange(np.floor(lo / 2.5) * 2.5, hi + 2.5, 2.5)
+        return [("swath", float(x)) for x in grid if abs(x) >= 1.0 and np.sign(x) == sign] or [("swath", 0.0)]
+
     def deflection(self, p: int):
         """Δβ_ск, Δβ_ум (K, T) для точки наведения p."""
         r, v = self.pas.r, self.pas.v
         F = np.array([f.ecef for f in self.frames])
+        if self.sensor.mode == "stripmap":
+            half = max((self.sensor.swath_km - self.sensor.frame_km) / 2.0, 0.0)
+            off = np.abs(self.cross_km - self.point_params[p][1])
+            # «отклонение» в км поперёк трассы относительно допустимой полуширины (≤ 0 — кадр в полосе)
+            dum = np.where(off <= half + 1e-9, 0.0, 999.0)[:, None] * np.ones((1, self.T))
+            return self.squint, dum
         if self.points is None:
             return self.squint, np.zeros_like(self.squint)
         return geometry.beam_deflection(r[None], v[None], self.points[p][None, None, :], F[:, None, :])
 
     def point_description(self, p: int) -> dict:
+        if self.sensor.mode == "stripmap":
+            return {"mode": "stripmap", "swath_center_km": self.point_params[p][1],
+                    "swath_km": self.sensor.swath_km}
         if self.points is None:
             return {"mode": "electronic"}
         la, lo, h = ecef_to_geodetic(self.points[p])

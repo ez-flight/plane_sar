@@ -31,6 +31,11 @@ def _parse_time(s) -> datetime:
     return datetime.fromisoformat(str(s).replace("Z", "+00:00")).replace(tzinfo=None)
 
 
+def _tle_epoch(sat) -> datetime:
+    yy, doy = int(sat.line1[18:20]), float(sat.line1[20:32])
+    return datetime(2000 + yy if yy < 57 else 1900 + yy, 1, 1) + timedelta(days=doy - 1)
+
+
 def build_scenario(cfg: dict):
     frame_km = float(cfg.get("frame_km", 5.0))
     parts = []
@@ -40,8 +45,20 @@ def build_scenario(cfg: dict):
         if kind == "point":
             parts.append(targets.point_element(e["id"], e["lat"], e["lon"], n_looks=int(e.get("looks", 1)), **common))
         elif kind == "line":
-            parts.append(targets.line_element(e["id"], [tuple(p) for p in e["points"]], frame_km=frame_km,
-                                              overlap_km=float(e.get("overlap_km", 0.1)), **common))
+            chord = False
+            if "gpkg" in e:
+                from .gis import cut_from_end, read_gpkg_lines
+                from .frames import distance_km
+                lines = read_gpkg_lines(e["gpkg"], e.get("layer"))
+                start = tuple(e["from"])
+                near = lambda l: float(np.min(distance_km(np.array(l)[:, 0], np.array(l)[:, 1], *start)))
+                pts = cut_from_end(min(lines, key=near), start, float(e.get("length_km", 100.0)))
+                chord = True
+            else:
+                pts = [tuple(p) for p in e["points"]]
+            parts.append(targets.line_element(e["id"], pts, frame_km=frame_km, chord=chord,
+                                              overlap_km=float(e.get("overlap_km", 0.1)),
+                                              n_frames=e.get("max_frames"), **common))
         elif kind == "area":
             parts.append(targets.area_element(e["id"], e["lat"], e["lon"], int(e.get("n_along", 2)),
                                               int(e.get("n_across", 2)), float(e.get("azimuth_deg", 0.0)),
@@ -123,6 +140,20 @@ def main(argv=None):
     sub = ap.add_subparsers(dest="cmd", required=True)
     a = sub.add_parser("plan", help="построить план съёмки по YAML-конфигу")
     a.add_argument("config")
+    c = sub.add_parser("chain", help="за сколько пролётов снимается цепочка кадров из .gpkg и какие кадры на каком витке")
+    c.add_argument("frames", help="GeoPackage с кадрами-полигонами (поле seq — номер кадра)")
+    c.add_argument("--preset", default="iceye", choices=sorted(PRESETS))
+    c.add_argument("--planes", type=int, default=1, help="число плоскостей ССО (МВВУ 10:30, 14:30, 6:00, 18:00)")
+    c.add_argument("--per-plane", type=int, default=1, help="КА в плоскости")
+    c.add_argument("--phase", type=float, default=0.0, help="фаза первого КА, °")
+    c.add_argument("--tle", help="файл TLE вместо синтетических КА")
+    c.add_argument("--norad", nargs="*", default=[], help="номера NORAD из файла TLE")
+    c.add_argument("--start", default=None, help="начало расчёта, UTC (по умолчанию эпоха TLE или 2026-10-10)")
+    c.add_argument("--days", type=float, default=10.0)
+    c.add_argument("--method", default=None, help="по умолчанию: strip для маршрутного режима, иначе proposed_cluster")
+    c.add_argument("--ltan", nargs="*", type=float, default=None, help="МВВУ плоскостей, ч (по умолчанию 10.5 14.5 6 18)")
+    c.add_argument("--out", default="result/chain")
+    c.add_argument("--name", default="chain_plan")
     b = sub.add_parser("experiments", help="воспроизвести таблицы 3–7 и рисунки 1–2 статьи")
     b.add_argument("names", nargs="*", help=f"из {', '.join(experiments.ALL)}; по умолчанию все")
     b.add_argument("--out", default="results")
@@ -134,6 +165,24 @@ def main(argv=None):
         for s in res["passes"]:
             print(f"  {s['start_utc']} {s['sat']}: кадров {s['frames']}, покрытие после пролёта {s['coverage_after']}")
         print(f"Итоговое покрытие Э/Σα = {res['coverage']}; не снято кадров: {len(res['not_shot'])}")
+    elif args.cmd == "chain":
+        from .chain import plan_chain, write_outputs
+        from .constellation import build_constellation
+        from .gis import read_gpkg_frames
+        sensor = PRESETS[args.preset]
+        if args.tle:
+            sats = [s for s in load_tle_file(args.tle) if not args.norad or s.line1[2:7].strip() in args.norad]
+            start = _parse_time(args.start) if args.start else _tle_epoch(sats[0])
+            who = ", ".join(s.name for s in sats)
+        else:
+            start = _parse_time(args.start or "2026-10-10T00:00:00")
+            kw = {"ltans": args.ltan} if args.ltan else {}
+            sats = build_constellation(args.planes, args.per_plane, start, sensor, phase_deg=args.phase, **kw)
+            who = f"{len(sats)} КА ({args.planes} пл. × {args.per_plane})"
+        frames_info = read_gpkg_frames(args.frames)
+        res = plan_chain(frames_info, sats, sensor, start, args.days, args.method)
+        title = f"{sensor.name}: {who}, начало {start:%Y-%m-%d %H:%M} UTC, {len(frames_info)} кадров"
+        print(write_outputs(res, args.frames, args.out, args.name, title))
     else:
         unknown = [n for n in args.names if n not in experiments.ALL]
         if unknown:

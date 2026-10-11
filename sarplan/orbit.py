@@ -73,6 +73,20 @@ class Satellite:
         self.line1, self.line2 = line1, line2
         self.orb = Orbital(name, line1=line1, line2=line2)
 
+    def rev_number(self, t) -> int:
+        """
+        Номер витка (счёт от восходящего узла, как в TLE): номер на эпоху плюс
+        число прохождений узла с эпохи (по среднему движению из TLE).
+        """
+        l1, l2 = self.line1, self.line2
+        yy, doy = int(l1[18:20]), float(l1[20:32])
+        epoch = np.datetime64(f"{2000 + yy if yy < 57 else 1900 + yy}-01-01T00:00:00", "us") + \
+            np.timedelta64(int(round((doy - 1) * 86400e6)), "us")
+        argp, m0, n = float(l2[34:42]), float(l2[43:51]), float(l2[52:63])
+        rev0 = int(l2[63:68] or 0)
+        days = float((to_dt64(t) - epoch) / np.timedelta64(1, "s")) / 86400.0
+        return rev0 + int(np.floor((argp + m0) / 360.0 + n * days))
+
     def states_eci(self, times):
         t = np.atleast_1d(to_dt64(times))
         pos, vel = self.orb.get_position(t, normalize=False)

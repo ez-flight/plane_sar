@@ -9,16 +9,44 @@
 
 from typing import List, Sequence, Tuple
 
+import os
+
 import numpy as np
 
 from .criterion import Element, Frame
 from .frames import azimuth_between, distance_km, offset_point
 
-# Ось нижнего Днестра от устья (Днестровский лиман) до Тирасполя, оцифрована приближённо
-DNESTR_AXIS = [
+# Точный профиль Днестра (OpenStreetMap, relation 2474595) в корне репозитория
+DNESTR_GPKG = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "Днестр.gpkg")
+BLACK_SEA_POINT = (46.07, 30.46)      # выход Днестровского лимана в море
+TIRASPOL = (46.84, 29.63)
+
+# Ось нижнего Днестра от устья до Тирасполя, оцифрована приближённо (запасной вариант без .gpkg)
+DNESTR_AXIS_APPROX = [
     (46.07, 30.46), (46.20, 30.33), (46.33, 30.25), (46.42, 30.27), (46.45, 30.12),
     (46.55, 30.02), (46.62, 29.93), (46.70, 29.80), (46.77, 29.70), (46.84, 29.63),
 ]
+
+
+def dnestr_axis(source: str = "auto", length_km: float = 250.0):
+    """
+    Ось нижнего Днестра от устья вверх по течению.
+    source: "gpkg" — точный профиль из Днестр.gpkg, "approx" — приближённая ломаная,
+    "auto" — gpkg, если файл есть.
+    """
+    if source == "approx" or (source == "auto" and not os.path.exists(DNESTR_GPKG)):
+        return list(DNESTR_AXIS_APPROX)
+    from .gis import cut_from_end, read_gpkg_lines
+    lines = read_gpkg_lines(DNESTR_GPKG)
+
+    def near(l):
+        a = np.array(l)
+        return float(np.min(distance_km(a[:, 0], a[:, 1], *TIRASPOL)))
+
+    return cut_from_end(min(lines, key=near), BLACK_SEA_POINT, length_km)
+
+
+DNESTR_AXIS = DNESTR_AXIS_APPROX
 
 Scenario = Tuple[List[Element], List[Frame]]
 
@@ -48,12 +76,32 @@ def resample_polyline(vertices: Sequence[Tuple[float, float]], step_km: float,
     return pts
 
 
+def resample_polyline_chord(vertices, step_km: float, max_points: int = None):
+    """
+    Центры кадров вдоль извилистой линии: следующий центр ставится там, где линия
+    удаляется от предыдущего центра на step_km по прямой, — так кадры покрывают
+    меандры без лишних перекрытий.
+    """
+    pts = [tuple(vertices[0])]
+    dense = resample_polyline(vertices, min(step_km / 20.0, 0.25))
+    for la, lo in dense[1:]:
+        if float(distance_km(pts[-1][0], pts[-1][1], la, lo)) >= step_km:
+            pts.append((la, lo))
+            if max_points and len(pts) >= max_points:
+                break
+    return pts
+
+
 def line_element(eid: str, vertices, frame_km: float = 5.0, overlap_km: float = 0.1,
                  alpha: float = 1.0, deadline_h: float = float("inf"),
-                 n_frames: int = None) -> Scenario:
-    """Линейный элемент: цепочка кадров вдоль оси с шагом frame_km - overlap_km."""
+                 n_frames: int = None, chord: bool = False) -> Scenario:
+    """
+    Линейный элемент: цепочка кадров вдоль оси с шагом frame_km - overlap_km
+    (по длине линии или, при chord=True, по прямой между центрами).
+    """
     step = frame_km - overlap_km
-    pts = resample_polyline(vertices, step, n_frames)
+    pts = (resample_polyline_chord(vertices, step, n_frames) if chord
+           else resample_polyline(vertices, step, n_frames))
     pts = [(float(a), float(b)) for a, b in pts]
     e = Element(eid, "line", alpha, deadline_h, meta={"n_frames": len(pts)})
     c = 1.0 / len(pts)
@@ -153,20 +201,23 @@ def urgent_request(rng, center, azimuth_deg, alpha: float = 8.0, deadline_h: flo
 
 
 def dnestr_targets(n_chain: int = 21, frame_km: float = 5.0, n_points: int = 19,
-                   seed: int = 54, chain_id: str = "DNESTR") -> Scenario:
+                   seed: int = 54, chain_id: str = "DNESTR", source: str = "auto") -> Scenario:
     """
-    Участок Днестра от Чёрного моря к Тирасполю: цепочка из n_chain рамок
-    frame_km × frame_km вдоль оси реки и n_points точечных объектов района.
+    Участок Днестра от устья к Тирасполю: цепочка из n_chain рамок frame_km × frame_km
+    вдоль оси реки (по точному профилю Днестр.gpkg, если он есть) и n_points точечных
+    объектов района.
     """
-    chain = line_element(chain_id, DNESTR_AXIS, frame_km=frame_km, overlap_km=frame_km * 0.02,
-                         n_frames=n_chain)
+    axis = dnestr_axis(source)
+    chord = len(axis) > len(DNESTR_AXIS_APPROX)
+    chain = line_element(chain_id, axis, frame_km=frame_km, overlap_km=frame_km * 0.02,
+                         n_frames=n_chain, chord=chord)
     if n_points == 0:
         return chain
     rng = np.random.default_rng(seed)
-    axis = resample_polyline(DNESTR_AXIS, 5.0)
+    near = [(f.lat, f.lon) for f in chain[1]]
     parts = [chain]
     for j in range(n_points):
-        la0, lo0 = axis[rng.integers(0, len(axis))]
+        la0, lo0 = near[rng.integers(0, len(near))]
         la, lo = offset_point(la0, lo0, float(rng.uniform(0, 360)), float(rng.uniform(3, 25)))
         parts.append(point_element(f"D{j:02d}", float(la), float(lo), float(rng.integers(1, 6))))
     return merge(*parts)
